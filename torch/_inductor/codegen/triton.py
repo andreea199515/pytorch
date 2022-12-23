@@ -822,13 +822,12 @@ class TritonKernel(Kernel):
         indirect_indexing = self.is_indirect_indexing(index)
         index, mask = self.indexing(index)
 
-        if "rmask" in mask:
-            # This eviction policy heuristic is untested.
-            # ptillet suggested we should try only doing this for
-            # the first N-1 loops and not for the final loop.
-            ep = ", eviction_policy='evict_last'"
-        else:
-            ep = ""
+        # Keep the variable in cache if we are going to reuse it
+        # Lezcano: Rather than evict_last it'd be even better to use no_allocate,
+        # but triton does not support it
+        ep_str = "first" if name in self.current_node.last_usage else "last"
+        ep = ", eviction_policy='evict_{}'".format(ep_str)
+
         # "other" below is a workaround for https://github.com/openai/triton/issues/737
         # for bool, even though it's likely subject to the same bug, setting `other` leads
         # to LLVM errors so we are skipping it for now
@@ -863,6 +862,12 @@ class TritonKernel(Kernel):
     def store(self, name, index, value, mode=None):
         var = self.args.output(name)
         index, mask = self.indexing(index, dense_indexing=True)
+
+        # Lezcano: This is not useful ATM and not supported by triton MLIR
+        # Revisit in the future in case it's supported and becomes useful
+        # Keep the variable in cache if we are going to reuse it
+        # ep_str = "first" if name in self.current_node.last_usage else "last"
+        # ep = "eviction_policy='evict_{}'".format(ep_str)
         if mode is None:
             line = f"tl.store({var} + ({index}), {value}, {mask})"
         elif mode == "atomic_add":
